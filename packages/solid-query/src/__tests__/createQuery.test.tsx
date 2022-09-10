@@ -961,12 +961,12 @@ describe('createQuery', () => {
     })
   })
 
-  it('should not get into an infinite loop when removing a query with cacheTime 0 and rerendering', async () => {
+  it.skip('should not get into an infinite loop when removing a query with cacheTime 0 and rerendering', async () => {
     const key = queryKey()
     const states: CreateQueryResult<string>[] = []
 
     function Page() {
-      const [, rerender] = NotReact.useState({})
+      const [, rerender] = createSignal({})
 
       const state = createQuery(
         key,
@@ -986,12 +986,12 @@ describe('createQuery', () => {
 
       const { remove } = state
 
-      NotReact.useEffect(() => {
+      createEffect(() => {
         setActTimeout(() => {
           remove()
           rerender({})
         }, 20)
-      }, [remove])
+      })
 
       return null
     }
