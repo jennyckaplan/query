@@ -7,9 +7,10 @@ import {
   onCleanup,
   createComputed,
   createResource,
-  batch,
+  Signal,
 } from 'solid-js'
-import { createStore } from 'solid-js/store'
+import { reconcile } from 'solid-js/store'
+import { createStore, unwrap } from 'solid-js/store'
 
 // Base Query Function that is used to create the query.
 export function createBaseQuery<
@@ -34,24 +35,41 @@ export function createBaseQuery<
   defaultedOptions._optimisticResults = 'optimistic'
   const observer = new Observer(queryClient, defaultedOptions)
 
-  const [state, setState] = createStore<QueryObserverResult<TData, TError>>(
-    // @ts-ignore
-    observer.getOptimisticResult(defaultedOptions),
+  function createDeepSignal<T>(value: T): Signal<T> {
+    const [store, setStore] = createStore({
+      value,
+    })
+    return [
+      () => store.value,
+      (v: T) => {
+        const unwrapped = unwrap(store.value)
+        typeof v === 'function' && (v = v(unwrapped))
+        setStore('value', reconcile(v))
+        return store.value
+      },
+    ] as Signal<T>
+  }
+
+  const [dataResource, { refetch }] = createResource<
+    QueryObserverResult<TData, TError>
+  >(
+    (_, { refetching }) => {
+      const result = refetching as QueryObserverResult<TData, TError>
+      return new Promise((resolve) => {
+        if (result.isSuccess) resolve(result)
+        if (result.isError && !result.isFetching) {
+          throw result.error
+        }
+      })
+    },
+    {
+      initialValue: observer.getOptimisticResult(defaultedOptions),
+      storage: createDeepSignal,
+    },
   )
 
-  const [dataResource, { refetch }] = createResource<TData | undefined>(() => {
-    return new Promise((resolve) => {
-      if (state.isSuccess) resolve(state.data)
-      if (state.isError && !state.isFetching) {
-        throw state.error
-      }
-    })
-  })
-
   const unsubscribe = observer.subscribe((result) => {
-    const reconciledResult = result
-    setState(reconciledResult)
-    refetch()
+    refetch(result)
   })
 
   onCleanup(() => unsubscribe())
@@ -65,17 +83,5 @@ export function createBaseQuery<
     observer.setOptions(newDefaultedOptions)
   })
 
-  const handler = {
-    get(
-      target: QueryObserverResult<TData, TError>,
-      prop: keyof QueryObserverResult<TData, TError>,
-    ): any {
-      if (prop === 'data') {
-        return dataResource()
-      }
-      return Reflect.get(target, prop)
-    },
-  }
-
-  return new Proxy(state, handler) as QueryObserverResult<TData, TError>
+  return dataResource()
 }
